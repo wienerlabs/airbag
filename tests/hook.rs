@@ -1,5 +1,5 @@
-use airbag::hook::{Call, parse_claude};
-use airbag::install::{CLAUDE_MATCHER, hook_command, install_claude, uninstall_claude};
+use airbag::hook::{Call, parse_claude, parse_codex};
+use airbag::install::{CLAUDE, CODEX, install, uninstall};
 use airbag::store::{Kind, Store};
 use serde_json::{Value, json};
 use std::fs;
@@ -8,9 +8,9 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-fn run_hook(store: &Path, input: &str) -> Output {
+fn run_hook(store: &Path, agent: &str, input: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_airbag"))
-        .args(["hook", "claude"])
+        .args(["hook", agent])
         .env("AIRBAG_HOME", store)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -84,10 +84,10 @@ fn install_keeps_other_settings_and_runs_once() {
         ] }
     });
     fs::write(&path, serde_json::to_string_pretty(&original).unwrap()).unwrap();
-    let command = hook_command("/opt/homebrew/bin/airbag");
+    let command = CLAUDE.command("/opt/homebrew/bin/airbag");
 
-    assert!(install_claude(&path, &command).unwrap());
-    assert!(!install_claude(&path, &command).unwrap());
+    assert!(install(&CLAUDE, &path, &command).unwrap());
+    assert!(!install(&CLAUDE, &path, &command).unwrap());
 
     let installed = read_json(&path);
     let keys: Vec<&str> = installed
@@ -100,16 +100,16 @@ fn install_keeps_other_settings_and_runs_once() {
     let groups = installed["hooks"]["PreToolUse"].as_array().unwrap();
     assert_eq!(groups.len(), 2);
     assert_eq!(groups[0], original["hooks"]["PreToolUse"][0]);
-    assert_eq!(groups[1]["matcher"], CLAUDE_MATCHER);
+    assert_eq!(groups[1]["matcher"], CLAUDE.matcher);
     assert_eq!(
         groups[1]["hooks"][0]["command"],
         "/opt/homebrew/bin/airbag hook claude"
     );
     assert!(path.with_extension("json.airbag-backup").exists());
 
-    assert!(uninstall_claude(&path).unwrap());
+    assert!(uninstall(&CLAUDE, &path).unwrap());
     assert_eq!(read_json(&path), original);
-    assert!(!uninstall_claude(&path).unwrap());
+    assert!(!uninstall(&CLAUDE, &path).unwrap());
 }
 
 #[test]
@@ -123,8 +123,8 @@ fn install_creates_missing_settings_and_writes_through_symlinks() {
     symlink(&real, &link).unwrap();
     let fresh = temp.path().join("new/.claude/settings.json");
 
-    assert!(install_claude(&link, "airbag hook claude").unwrap());
-    assert!(install_claude(&fresh, "airbag hook claude").unwrap());
+    assert!(install(&CLAUDE, &link, "airbag hook claude").unwrap());
+    assert!(install(&CLAUDE, &fresh, "airbag hook claude").unwrap());
 
     assert!(
         fs::symlink_metadata(&link)
@@ -139,14 +139,14 @@ fn install_creates_missing_settings_and_writes_through_symlinks() {
     );
     assert_eq!(
         read_json(&fresh)["hooks"]["PreToolUse"][0]["matcher"],
-        CLAUDE_MATCHER
+        CLAUDE.matcher
     );
 }
 
 #[test]
 fn hook_command_quotes_paths_with_spaces() {
     assert_eq!(
-        hook_command("/Users/me/My Tools/airbag"),
+        CLAUDE.command("/Users/me/My Tools/airbag"),
         "'/Users/me/My Tools/airbag' hook claude"
     );
 }
@@ -166,7 +166,7 @@ fn hook_binary_snapshots_before_a_bash_call() {
     })
     .to_string();
 
-    let output = run_hook(&store_dir, &input);
+    let output = run_hook(&store_dir, "claude", &input);
 
     assert!(
         output.status.success(),
@@ -205,11 +205,128 @@ fn hook_binary_skips_folders_outside_git_and_flags_bad_input() {
     })
     .to_string();
 
-    let quiet = run_hook(&store_dir, &outside);
-    let broken = run_hook(&store_dir, "{");
+    let quiet = run_hook(&store_dir, "claude", &outside);
+    let broken = run_hook(&store_dir, "claude", "{");
 
     assert!(quiet.status.success());
     assert_eq!(fs::read_dir(store_dir.join("projects")).unwrap().count(), 0);
     assert_eq!(broken.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&broken.stderr).contains("not protected"));
+}
+
+#[test]
+fn codex_shell_calls_accept_a_string_or_an_argv_list() {
+    let text = parse_codex(
+        r#"{"session_id":"s2","turn_id":"t1","cwd":"/work/app","hook_event_name":"PreToolUse","model":"gpt-5","tool_name":"Bash","tool_use_id":"call_1","tool_input":{"command":"rm -rf build"}}"#,
+    )
+    .unwrap();
+    let argv = parse_codex(
+        r#"{"cwd":"/work/app","tool_name":"Bash","tool_input":{"command":["bash","-lc","git clean -fdx"],"workdir":"pkg"}}"#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        (
+            text.agent.as_str(),
+            text.tool.as_str(),
+            text.detail.as_str()
+        ),
+        ("codex", "Bash", "rm -rf build")
+    );
+    assert_eq!(text.start, PathBuf::from("/work/app"));
+    assert_eq!(argv.detail, "bash -lc git clean -fdx");
+    assert_eq!(argv.start, PathBuf::from("/work/app/pkg"));
+}
+
+#[test]
+fn codex_patches_are_logged_by_the_files_they_touch() {
+    let patch = "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** Add File: notes.md\n+hi\n*** Delete File: old.txt\n*** End Patch\n";
+    let input = json!({
+        "cwd": "/work/app",
+        "tool_name": "apply_patch",
+        "tool_input": { "command": patch }
+    })
+    .to_string();
+
+    let call = parse_codex(&input).unwrap();
+
+    assert_eq!(call.detail, "src/main.rs, notes.md, old.txt");
+    assert_eq!(call.start, PathBuf::from("/work/app"));
+}
+
+#[test]
+fn codex_install_writes_hooks_json_and_leaves_claude_hooks_alone() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join(".codex/hooks.json");
+    let shared = temp.path().join("shared.json");
+
+    assert!(install(&CODEX, &path, &CODEX.command("/usr/local/bin/airbag")).unwrap());
+    assert!(install(&CLAUDE, &shared, "airbag hook claude").unwrap());
+    assert!(install(&CODEX, &shared, "airbag hook codex").unwrap());
+    assert!(uninstall(&CODEX, &shared).unwrap());
+
+    assert_eq!(
+        read_json(&path),
+        json!({ "hooks": { "PreToolUse": [{
+            "matcher": "^(Bash|apply_patch)$",
+            "hooks": [{ "type": "command", "command": "/usr/local/bin/airbag hook codex", "timeout": 60 }]
+        }] } })
+    );
+    let remaining = read_json(&shared);
+    let groups = remaining["hooks"]["PreToolUse"].as_array().unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0]["hooks"][0]["command"], "airbag hook claude");
+}
+
+#[test]
+fn hook_files_live_where_each_agent_reads_them() {
+    let root = Path::new("/work/app");
+
+    assert_eq!(
+        CLAUDE.settings_path(Some(root)).unwrap(),
+        PathBuf::from("/work/app/.claude/settings.json")
+    );
+    assert_eq!(
+        CODEX.settings_path(Some(root)).unwrap(),
+        PathBuf::from("/work/app/.codex/hooks.json")
+    );
+}
+
+#[test]
+fn hook_binary_snapshots_before_a_codex_patch() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("app");
+    fs::create_dir_all(root.join(".git")).unwrap();
+    fs::write(root.join("main.rs"), "fn main() {}\n").unwrap();
+    let store_dir = temp.path().join("store");
+    let input = json!({
+        "session_id": "c1",
+        "cwd": root,
+        "tool_name": "apply_patch",
+        "tool_input": { "command": "*** Begin Patch\n*** Delete File: main.rs\n*** End Patch\n" }
+    })
+    .to_string();
+
+    let output = run_hook(&store_dir, "codex", &input);
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let snapshots = Store::at(store_dir)
+        .unwrap()
+        .project(&root)
+        .unwrap()
+        .snapshots()
+        .unwrap();
+    let action = &snapshots[0].actions[0];
+    assert_eq!(
+        (
+            action.agent.as_str(),
+            action.tool.as_str(),
+            action.detail.as_str()
+        ),
+        ("codex", "apply_patch", "main.rs")
+    );
 }

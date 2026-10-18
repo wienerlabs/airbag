@@ -39,6 +39,15 @@ build it yourself: `cargo install --git https://github.com/wienerlabs/airbag`.
 sessions and every Bash, Edit, Write, MultiEdit and NotebookEdit call in a git project is
 protected, including calls made by subagents. `airbag uninstall claude` removes it.
 
+### Other agents
+
+| Agent | Install | Protects | Status |
+| --- | --- | --- | --- |
+| Claude Code | `airbag install claude` | Bash, Edit, Write, MultiEdit, NotebookEdit | tested end to end with Claude Code 2.1.299 |
+| Codex CLI | `airbag install codex`, then trust it once in `/hooks` | shell commands and `apply_patch` | built from the Codex source and docs (0.124.0 or newer), not yet run end to end |
+
+`--project` writes to the project's own settings instead of your user settings.
+
 ## What it looks like
 
 ```
@@ -70,7 +79,7 @@ changed your mind? run `airbag redo`
 | `airbag diff` | Preview what `undo` would revert. `airbag diff 12` compares with #12. |
 | `airbag log` | Every snapshot, the agent action that followed it, and what that action changed. |
 | `airbag snap -m "note"` | Take a snapshot yourself, for example before you start a big prompt. |
-| `airbag install claude` | Hook into Claude Code (`--project` writes to this project's settings instead). |
+| `airbag install claude` | Hook into Claude Code, or `codex` for Codex CLI. |
 | `airbag gc` | Delete stored copies that no snapshot needs any more. Safe to run any time. |
 
 ## How it works
@@ -112,7 +121,7 @@ Undo is the part of an undo tool that can lose data, so it follows strict rules:
 - Folders skipped on purpose (`node_modules`, `target`, `.venv` and friends), unless you
   change `AIRBAG_EXCLUDE`.
 - Windows. macOS and Linux only for now.
-- Agents other than Claude Code. Adapters for Codex, Gemini CLI, Cursor and OpenCode are next.
+- Agents without a hook into airbag yet. Gemini CLI, Cursor and OpenCode adapters are next.
 
 ## Settings
 

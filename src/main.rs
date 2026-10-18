@@ -89,6 +89,27 @@ enum Command {
 #[derive(Clone, Copy, ValueEnum)]
 enum Agent {
     Claude,
+    Codex,
+}
+
+impl Agent {
+    fn hookup(self) -> &'static install::Hookup {
+        match self {
+            Agent::Claude => &install::CLAUDE,
+            Agent::Codex => &install::CODEX,
+        }
+    }
+
+    fn installed_note(self) -> &'static str {
+        match self {
+            Agent::Claude => {
+                "Claude Code now takes a snapshot before every Bash, Edit and Write call in a git project; restart open sessions so they load it"
+            }
+            Agent::Codex => {
+                "Codex now takes a snapshot before every shell command and apply_patch in a git project; open /hooks in Codex once and trust the airbag hook"
+            }
+        }
+    }
 }
 
 struct Ctx {
@@ -285,18 +306,12 @@ fn collect_garbage(ctx: &Ctx) -> Result<()> {
 }
 
 fn install_hook(ctx: &Ctx, agent: Agent, project: bool) -> Result<()> {
-    let settings_path = settings_path(ctx, agent, project)?;
-    let command = install::hook_command(&airbag_program());
-    if install::install_claude(&settings_path, &command)? {
+    let hookup = agent.hookup();
+    let settings_path = settings_path(ctx, hookup, project)?;
+    let command = hookup.command(&airbag_program());
+    if install::install(hookup, &settings_path, &command)? {
         println!("added the airbag hook to {}", settings_path.display());
-        println!(
-            "Claude Code now takes a snapshot before every Bash, Edit and Write call in a git project"
-        );
-        println!(
-            "{}",
-            ctx.paint
-                .dim("restart open Claude Code sessions so they load it")
-        );
+        println!("{}", ctx.paint.dim(agent.installed_note()));
     } else {
         println!("the airbag hook is already in {}", settings_path.display());
     }
@@ -304,8 +319,9 @@ fn install_hook(ctx: &Ctx, agent: Agent, project: bool) -> Result<()> {
 }
 
 fn uninstall_hook(ctx: &Ctx, agent: Agent, project: bool) -> Result<()> {
-    let settings_path = settings_path(ctx, agent, project)?;
-    if install::uninstall_claude(&settings_path)? {
+    let hookup = agent.hookup();
+    let settings_path = settings_path(ctx, hookup, project)?;
+    if install::uninstall(hookup, &settings_path)? {
         println!("removed the airbag hook from {}", settings_path.display());
     } else {
         println!("no airbag hook found in {}", settings_path.display());
@@ -313,15 +329,13 @@ fn uninstall_hook(ctx: &Ctx, agent: Agent, project: bool) -> Result<()> {
     Ok(())
 }
 
-fn settings_path(ctx: &Ctx, agent: Agent, project: bool) -> Result<PathBuf> {
+fn settings_path(ctx: &Ctx, hookup: &install::Hookup, project: bool) -> Result<PathBuf> {
     let root = if project {
         Some(ctx.project()?.root)
     } else {
         None
     };
-    match agent {
-        Agent::Claude => install::claude_settings(root.as_deref()),
-    }
+    hookup.settings_path(root.as_deref())
 }
 
 fn run_hook(ctx: &Ctx, agent: Agent) -> Result<()> {
@@ -329,6 +343,7 @@ fn run_hook(ctx: &Ctx, agent: Agent) -> Result<()> {
     std::io::stdin().read_to_string(&mut input)?;
     let call = match agent {
         Agent::Claude => hook::parse_claude(&input)?,
+        Agent::Codex => hook::parse_codex(&input)?,
     };
     hook::protect(&ctx.store, &ctx.settings, call)?;
     Ok(())
