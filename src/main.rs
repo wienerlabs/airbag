@@ -363,19 +363,20 @@ fn log_line(snapshot: &Snapshot, changes: &[Change], paint: &Paint) -> String {
         count => paint.dim(&format!("  (+{} earlier)", count - 1)),
     };
     format!(
-        "{}  {}  {:<7} {:<6} {:<48}  {}{}",
+        "{}  {}  {}  {:<7}{:<6} {}{}",
         paint.bold(&format!("#{:<4}", snapshot.id)),
-        paint.dim(&format!("{:>8}", ago(snapshot.created_ms))),
+        paint.dim(&format!("{:>7}", ago(snapshot.created_ms))),
+        summary(changes, paint),
         agent,
         tool,
-        one_line(detail, 48),
-        summary(changes, paint),
+        one_line(detail, 60),
         earlier
     )
 }
 
 fn summary(changes: &[Change], paint: &Paint) -> String {
-    let parts: Vec<String> = [
+    const WIDTH: usize = 11;
+    let parts: Vec<(String, &str)> = [
         (Status::Added, "+", "32"),
         (Status::Modified, "~", "33"),
         (Status::Deleted, "-", "31"),
@@ -386,14 +387,22 @@ fn summary(changes: &[Change], paint: &Paint) -> String {
             .iter()
             .filter(|change| change.status == status)
             .count();
-        (count > 0).then(|| paint.wrap(color, &format!("{sign}{count}")))
+        (count > 0).then(|| (format!("{sign}{count}"), color))
     })
     .collect();
     if parts.is_empty() {
-        paint.dim("no changes")
-    } else {
-        parts.join(" ")
+        return paint.dim(&format!("{:<WIDTH$}", "no changes"));
     }
+    let shown = parts.iter().map(|(text, _)| text.len()).sum::<usize>() + parts.len() - 1;
+    let colored: Vec<String> = parts
+        .iter()
+        .map(|(text, color)| paint.wrap(color, text))
+        .collect();
+    format!(
+        "{}{}",
+        colored.join(" "),
+        " ".repeat(WIDTH.saturating_sub(shown))
+    )
 }
 
 fn describe(snapshot: &Snapshot) -> String {
