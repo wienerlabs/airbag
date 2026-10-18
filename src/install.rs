@@ -13,6 +13,7 @@ pub struct Hookup {
     pub event: &'static str,
     pub matcher: &'static str,
     pub timeout: u64,
+    pub named: bool,
 }
 
 pub const CLAUDE: Hookup = Hookup {
@@ -23,6 +24,7 @@ pub const CLAUDE: Hookup = Hookup {
     event: "PreToolUse",
     matcher: "Bash|Edit|Write|MultiEdit|NotebookEdit",
     timeout: 60,
+    named: false,
 };
 
 pub const CODEX: Hookup = Hookup {
@@ -33,6 +35,18 @@ pub const CODEX: Hookup = Hookup {
     event: "PreToolUse",
     matcher: "^(Bash|apply_patch)$",
     timeout: 60,
+    named: false,
+};
+
+pub const GEMINI: Hookup = Hookup {
+    agent: "gemini",
+    folder: ".gemini",
+    file: "settings.json",
+    home_env: None,
+    event: "BeforeTool",
+    matcher: "run_shell_command|write_file|replace",
+    timeout: 60_000,
+    named: true,
 };
 
 impl Hookup {
@@ -51,10 +65,11 @@ impl Hookup {
     }
 
     fn entry(&self, command: &str) -> Value {
-        json!({
-            "matcher": self.matcher,
-            "hooks": [{ "type": "command", "command": command, "timeout": self.timeout }]
-        })
+        let mut hook = json!({ "type": "command", "command": command, "timeout": self.timeout });
+        if self.named {
+            hook["name"] = json!("airbag");
+        }
+        json!({ "matcher": self.matcher, "hooks": [hook] })
     }
 
     fn owns(&self, hook: &Value) -> bool {

@@ -23,6 +23,10 @@ pub fn parse_codex(input: &str) -> Result<Call> {
     parse_tool_call("codex", "Bash", input)
 }
 
+pub fn parse_gemini(input: &str) -> Result<Call> {
+    parse_tool_call("gemini", "run_shell_command", input)
+}
+
 fn parse_tool_call(agent: &str, shell_tool: &str, input: &str) -> Result<Call> {
     let value: Value = serde_json::from_str(input).context("hook input is not JSON")?;
     let cwd = PathBuf::from(value["cwd"].as_str().context("hook input has no cwd")?);

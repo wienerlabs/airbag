@@ -90,6 +90,7 @@ enum Command {
 enum Agent {
     Claude,
     Codex,
+    Gemini,
 }
 
 impl Agent {
@@ -97,6 +98,7 @@ impl Agent {
         match self {
             Agent::Claude => &install::CLAUDE,
             Agent::Codex => &install::CODEX,
+            Agent::Gemini => &install::GEMINI,
         }
     }
 
@@ -107,6 +109,9 @@ impl Agent {
             }
             Agent::Codex => {
                 "Codex now takes a snapshot before every shell command and apply_patch in a git project; open /hooks in Codex once and trust the airbag hook"
+            }
+            Agent::Gemini => {
+                "Gemini CLI now takes a snapshot before every shell command, write_file and replace in a git project; restart open sessions so they load it"
             }
         }
     }
@@ -344,6 +349,7 @@ fn run_hook(ctx: &Ctx, agent: Agent) -> Result<()> {
     let call = match agent {
         Agent::Claude => hook::parse_claude(&input)?,
         Agent::Codex => hook::parse_codex(&input)?,
+        Agent::Gemini => hook::parse_gemini(&input)?,
     };
     hook::protect(&ctx.store, &ctx.settings, call)?;
     Ok(())
