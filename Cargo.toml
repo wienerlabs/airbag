@@ -1,0 +1,17 @@
+[package]
+name = "airbag-cli"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+description = "Undo anything your AI coding agent did to your disk, bash commands included."
+license = "MIT"
+repository = "https://github.com/wienerlabs/airbag"
+readme = "README.md"
+keywords = ["ai", "agents", "undo", "snapshot", "claude-code"]
+categories = ["command-line-utilities", "filesystem", "development-tools"]
+
+[[bin]]
+name = "airbag"
+path = "src/main.rs"
+
+[dependencies]
