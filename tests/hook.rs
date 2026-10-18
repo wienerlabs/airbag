@@ -1,5 +1,5 @@
-use airbag::hook::{Call, parse_claude, parse_codex};
-use airbag::install::{CLAUDE, CODEX, install, uninstall};
+use airbag::hook::{Call, parse_claude, parse_codex, parse_gemini};
+use airbag::install::{CLAUDE, CODEX, GEMINI, install, uninstall};
 use airbag::store::{Kind, Store};
 use serde_json::{Value, json};
 use std::fs;
@@ -328,5 +328,101 @@ fn hook_binary_snapshots_before_a_codex_patch() {
             action.detail.as_str()
         ),
         ("codex", "apply_patch", "main.rs")
+    );
+}
+
+#[test]
+fn gemini_shell_and_file_tools_protect_the_right_project() {
+    let shell = parse_gemini(
+        r#"{"session_id":"g1","transcript_path":"/tmp/g1.json","cwd":"/work/app","hook_event_name":"BeforeTool","timestamp":"2026-10-18T10:00:00.000Z","tool_name":"run_shell_command","tool_input":{"command":"rm -rf dist","directory":"web"}}"#,
+    )
+    .unwrap();
+    let write = parse_gemini(
+        r#"{"cwd":"/work/app","tool_name":"write_file","tool_input":{"file_path":"/other/repo/README.md","content":"x"}}"#,
+    )
+    .unwrap();
+    let replace = parse_gemini(
+        r#"{"cwd":"/work/app","tool_name":"replace","tool_input":{"file_path":"src/lib.rs","old_string":"a","new_string":"b"}}"#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        (shell.agent.as_str(), shell.detail.as_str()),
+        ("gemini", "rm -rf dist")
+    );
+    assert_eq!(shell.start, PathBuf::from("/work/app/web"));
+    assert_eq!(shell.session.as_deref(), Some("g1"));
+    assert_eq!(write.start, PathBuf::from("/other/repo/README.md"));
+    assert_eq!(replace.start, PathBuf::from("/work/app/src/lib.rs"));
+}
+
+#[test]
+fn gemini_install_uses_before_tool_a_name_and_milliseconds() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join(".gemini/settings.json");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        &path,
+        r#"{ "theme": "GitHub", "hooksConfig": { "enabled": true } }"#,
+    )
+    .unwrap();
+
+    assert!(install(&GEMINI, &path, "airbag hook gemini").unwrap());
+
+    let settings = read_json(&path);
+    assert_eq!(settings["theme"], "GitHub");
+    assert_eq!(
+        settings["hooks"]["BeforeTool"],
+        json!([{
+            "matcher": "run_shell_command|write_file|replace",
+            "hooks": [{ "type": "command", "command": "airbag hook gemini", "timeout": 60000, "name": "airbag" }]
+        }])
+    );
+    assert_eq!(
+        GEMINI.settings_path(Some(Path::new("/work/app"))).unwrap(),
+        PathBuf::from("/work/app/.gemini/settings.json")
+    );
+    assert!(uninstall(&GEMINI, &path).unwrap());
+    assert_eq!(read_json(&path)["hooks"]["BeforeTool"], json!([]));
+}
+
+#[test]
+fn hook_binary_snapshots_before_a_gemini_shell_command() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("app");
+    fs::create_dir_all(root.join(".git")).unwrap();
+    fs::write(root.join("main.rs"), "fn main() {}\n").unwrap();
+    let store_dir = temp.path().join("store");
+    let input = json!({
+        "session_id": "g2",
+        "cwd": root,
+        "hook_event_name": "BeforeTool",
+        "tool_name": "run_shell_command",
+        "tool_input": { "command": "rm main.rs" }
+    })
+    .to_string();
+
+    let output = run_hook(&store_dir, "gemini", &input);
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty() && output.stderr.is_empty());
+    let snapshots = Store::at(store_dir)
+        .unwrap()
+        .project(&root)
+        .unwrap()
+        .snapshots()
+        .unwrap();
+    let action = &snapshots[0].actions[0];
+    assert_eq!(
+        (
+            action.agent.as_str(),
+            action.tool.as_str(),
+            action.detail.as_str()
+        ),
+        ("gemini", "run_shell_command", "rm main.rs")
     );
 }
