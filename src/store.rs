@@ -97,6 +97,14 @@ pub fn now_ms() -> u64 {
         .map_or(0, |elapsed| elapsed.as_millis() as u64)
 }
 
+pub fn unique_suffix() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let count = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{}-{nanos}-{count}", std::process::id())
+}
+
 pub fn home_dir() -> Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -129,13 +137,7 @@ impl Store {
     }
 
     pub fn temp_path(&self) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_nanos());
-        let count = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-        self.home
-            .join("tmp")
-            .join(format!("{}-{nanos}-{count}", std::process::id()))
+        self.home.join("tmp").join(unique_suffix())
     }
 
     pub fn adopt(&self, temp: &Path, hash: &str) -> Result<()> {

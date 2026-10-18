@@ -153,8 +153,16 @@ pub fn find_node(store: &Store, tree: &str, path: &str) -> Result<Option<Node>> 
     Ok(None)
 }
 
-fn is_plain_name(name: &str) -> bool {
+pub fn is_plain_name(name: &str) -> bool {
     !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\0'])
+}
+
+pub fn join_rel(rel: &str, name: &str) -> String {
+    if rel.is_empty() {
+        name.to_string()
+    } else {
+        format!("{rel}/{name}")
+    }
 }
 
 pub fn hash_file(path: &Path) -> Result<String> {
@@ -221,6 +229,16 @@ pub fn take(
     action: Option<Action>,
 ) -> Result<Snapshot> {
     let _lock = project.lock()?;
+    take_locked(store, project, settings, kind, action)
+}
+
+pub fn take_locked(
+    store: &Store,
+    project: &Project,
+    settings: &Settings,
+    kind: Kind,
+    action: Option<Action>,
+) -> Result<Snapshot> {
     let capture = capture(store, project, settings, Mode::Store)?;
     let ids = project.ids()?;
     if kind == Kind::Agent
@@ -298,11 +316,7 @@ impl Walker<'_> {
             if self.settings.excludes.contains(&name) {
                 continue;
             }
-            let child = if rel.is_empty() {
-                name.clone()
-            } else {
-                format!("{rel}/{name}")
-            };
+            let child = join_rel(rel, &name);
             let meta = match fs::symlink_metadata(&path) {
                 Ok(meta) => meta,
                 Err(error) if error.kind() == ErrorKind::NotFound => continue,
