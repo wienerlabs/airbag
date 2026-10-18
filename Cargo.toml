@@ -14,4 +14,17 @@ categories = ["command-line-utilities", "filesystem", "development-tools"]
 name = "airbag"
 path = "src/main.rs"
 
+[lib]
+name = "airbag"
+path = "src/lib.rs"
+
 [dependencies]
+anyhow = "1.0.104"
+blake3 = "1.8.7"
+clap = { version = "4.6.7", features = ["derive"] }
+reflink-copy = "0.1.30"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
