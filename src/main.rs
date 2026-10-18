@@ -1,9 +1,10 @@
 use airbag::restore::{self, Change, Restored, Status};
 use airbag::snapshot::{self, Settings};
 use airbag::store::{Action, Kind, Project, Snapshot, Store, now_ms};
+use airbag::{hook, install};
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
-use std::io::IsTerminal;
+use clap::{Parser, Subcommand, ValueEnum};
+use std::io::{IsTerminal, Read};
 use std::path::{Component, Path, PathBuf};
 
 const DIFF_LINES: usize = 200;
@@ -59,6 +60,33 @@ enum Command {
     },
     #[command(about = "Revert the last undo")]
     Redo,
+    #[command(
+        about = "Make an AI coding agent snapshot your git projects before every risky tool call"
+    )]
+    Install {
+        agent: Agent,
+        #[arg(
+            long,
+            help = "Write to this project's settings instead of your user settings"
+        )]
+        project: bool,
+    },
+    #[command(about = "Remove the airbag hook from an agent")]
+    Uninstall {
+        agent: Agent,
+        #[arg(
+            long,
+            help = "Remove it from this project's settings instead of your user settings"
+        )]
+        project: bool,
+    },
+    #[command(hide = true)]
+    Hook { agent: Agent },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Agent {
+    Claude,
 }
 
 struct Ctx {
@@ -88,6 +116,10 @@ fn run(cli: Cli) -> Result<()> {
         Command::Diff { id, path } => show_diff(&ctx, id, path),
         Command::Undo { id, path } => undo(&ctx, id, path),
         Command::Redo => redo(&ctx),
+        Command::Install { agent, project } => install_hook(&ctx, agent, project),
+        Command::Uninstall { agent, project } => uninstall_hook(&ctx, agent, project),
+        Command::Hook { agent } => run_hook(&ctx, agent)
+            .context("could not take a snapshot, so this tool call is not protected"),
     }
 }
 
@@ -225,6 +257,60 @@ fn redo(ctx: &Ctx) -> Result<()> {
     let restored = restore::restore(&ctx.store, &project, &ctx.settings, &target, None)?;
     print_restored(&target, &restored, &ctx.paint);
     Ok(())
+}
+
+fn install_hook(ctx: &Ctx, agent: Agent, project: bool) -> Result<()> {
+    let settings_path = settings_path(ctx, agent, project)?;
+    let command = install::hook_command(&airbag_program());
+    if install::install_claude(&settings_path, &command)? {
+        println!("added the airbag hook to {}", settings_path.display());
+        println!(
+            "Claude Code now takes a snapshot before every Bash, Edit and Write call in a git project"
+        );
+        println!(
+            "{}",
+            ctx.paint
+                .dim("restart open Claude Code sessions so they load it")
+        );
+    } else {
+        println!("the airbag hook is already in {}", settings_path.display());
+    }
+    Ok(())
+}
+
+fn uninstall_hook(ctx: &Ctx, agent: Agent, project: bool) -> Result<()> {
+    let settings_path = settings_path(ctx, agent, project)?;
+    if install::uninstall_claude(&settings_path)? {
+        println!("removed the airbag hook from {}", settings_path.display());
+    } else {
+        println!("no airbag hook found in {}", settings_path.display());
+    }
+    Ok(())
+}
+
+fn settings_path(ctx: &Ctx, agent: Agent, project: bool) -> Result<PathBuf> {
+    let root = if project {
+        Some(ctx.project()?.root)
+    } else {
+        None
+    };
+    match agent {
+        Agent::Claude => install::claude_settings(root.as_deref()),
+    }
+}
+
+fn run_hook(ctx: &Ctx, agent: Agent) -> Result<()> {
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input)?;
+    let call = match agent {
+        Agent::Claude => hook::parse_claude(&input)?,
+    };
+    hook::protect(&ctx.store, &ctx.settings, call)?;
+    Ok(())
+}
+
+fn airbag_program() -> String {
+    std::env::current_exe().map_or_else(|_| "airbag".to_string(), |path| path.display().to_string())
 }
 
 fn print_restored(target: &Snapshot, restored: &Restored, paint: &Paint) {

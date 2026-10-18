@@ -22,6 +22,7 @@ const DEFAULT_EXCLUDES: &[&str] = &[
     ".mypy_cache",
     ".ruff_cache",
     ".DS_Store",
+    ".cc-writes",
 ];
 const MAX_ACTIONS_PER_SNAPSHOT: usize = 50;
 
