@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fs::{self, File, Metadata};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
@@ -141,11 +142,11 @@ impl Store {
     }
 
     pub fn adopt(&self, temp: &Path, hash: &str) -> Result<()> {
-        let dest = self.object_path(hash);
-        if dest.exists() {
+        if self.refresh(hash) {
             fs::remove_file(temp)?;
             return Ok(());
         }
+        let dest = self.object_path(hash);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -155,12 +156,33 @@ impl Store {
 
     pub fn put_bytes(&self, bytes: &[u8]) -> Result<String> {
         let hash = blake3::hash(bytes).to_hex().to_string();
-        if !self.object_path(&hash).exists() {
+        if !self.refresh(&hash) {
             let temp = self.temp_path();
             fs::write(&temp, bytes)?;
             self.adopt(&temp, &hash)?;
         }
         Ok(hash)
+    }
+
+    fn refresh(&self, hash: &str) -> bool {
+        let path = self.object_path(hash);
+        fs::metadata(&path)
+            .and_then(|meta| fs::set_permissions(&path, meta.permissions()))
+            .is_ok()
+    }
+
+    pub fn projects(&self) -> Result<Vec<Project>> {
+        let mut projects = Vec::new();
+        for entry in fs::read_dir(self.home.join("projects"))? {
+            let dir = entry?.path();
+            if let Ok(root) = fs::read(dir.join("root")) {
+                projects.push(Project {
+                    root: PathBuf::from(OsStr::from_bytes(&root)),
+                    dir,
+                });
+            }
+        }
+        Ok(projects)
     }
 
     pub fn read_object(&self, hash: &str) -> Result<Vec<u8>> {

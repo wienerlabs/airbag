@@ -64,6 +64,7 @@ changed your mind? run `airbag redo`
 | `airbag log` | Every snapshot, the agent action that followed it, and what that action changed. |
 | `airbag snap -m "note"` | Take a snapshot yourself, for example before you start a big prompt. |
 | `airbag install claude` | Hook into Claude Code (`--project` writes to this project's settings instead). |
+| `airbag gc` | Delete stored copies that no snapshot needs any more. Safe to run any time. |
 
 ## How it works
 
@@ -123,6 +124,8 @@ milliseconds. The first one in a project reads every file once.
 
 **How much disk does it use?** On APFS, btrfs and XFS almost none until files change, and then
 only the old versions of the changed files. Elsewhere, one copy of each version of each file.
+Snapshots past `AIRBAG_KEEP` are dropped on their own, and `airbag gc` frees the copies only
+they used.
 
 **Does anything leave my machine?** No. airbag has no network code. Everything stays in
 `~/.airbag`.
