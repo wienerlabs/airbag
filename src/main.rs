@@ -1,7 +1,7 @@
 use airbag::restore::{self, Change, Restored, Status};
 use airbag::snapshot::{self, Settings};
 use airbag::store::{Action, Kind, Project, Snapshot, Store, now_ms};
-use airbag::{hook, install};
+use airbag::{gc, hook, install};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::io::{IsTerminal, Read};
@@ -80,6 +80,8 @@ enum Command {
         )]
         project: bool,
     },
+    #[command(about = "Delete stored copies that no snapshot needs any more")]
+    Gc,
     #[command(hide = true)]
     Hook { agent: Agent },
 }
@@ -116,6 +118,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Diff { id, path } => show_diff(&ctx, id, path),
         Command::Undo { id, path } => undo(&ctx, id, path),
         Command::Redo => redo(&ctx),
+        Command::Gc => collect_garbage(&ctx),
         Command::Install { agent, project } => install_hook(&ctx, agent, project),
         Command::Uninstall { agent, project } => uninstall_hook(&ctx, agent, project),
         Command::Hook { agent } => run_hook(&ctx, agent)
@@ -256,6 +259,28 @@ fn redo(ctx: &Ctx) -> Result<()> {
         restore::redo_target(&project)?.context("nothing to redo: no undo has run here yet")?;
     let restored = restore::restore(&ctx.store, &project, &ctx.settings, &target, None)?;
     print_restored(&target, &restored, &ctx.paint);
+    Ok(())
+}
+
+fn collect_garbage(ctx: &Ctx) -> Result<()> {
+    let collected = gc::collect(&ctx.store)?;
+    let noun = if collected.removed == 1 {
+        "copy"
+    } else {
+        "copies"
+    };
+    println!(
+        "removed {} stored {noun} no snapshot needs ({} at most), kept {}",
+        collected.removed,
+        human_bytes(collected.freed_bytes),
+        collected.kept
+    );
+    println!(
+        "{}",
+        ctx.paint.dim(
+            "copies made in the last hour are always kept, so snapshots in progress stay whole"
+        )
+    );
     Ok(())
 }
 
