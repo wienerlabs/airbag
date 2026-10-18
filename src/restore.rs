@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::ErrorKind;
 use std::os::unix::fs::{PermissionsExt, symlink};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Status {
@@ -79,6 +79,7 @@ pub fn restore(
     let _lock = project.lock()?;
     let (parent, wanted) = entries_at(store, &target.tree, scope)?;
     ensure_objects(store, &wanted)?;
+    enter_folders(&project.root, &parent, false)?;
     let detail = match scope {
         Some(path) => format!("state before restoring {path} from #{}", target.id),
         None => format!("state before restoring #{}", target.id),
@@ -92,17 +93,43 @@ pub fn restore(
     };
     let safety = snapshot::take_locked(store, project, settings, Kind::Undo, Some(action))?;
     let (_, current) = entries_at(store, &safety.tree, scope)?;
-    let base = project.root.join(&parent);
-    fs::create_dir_all(&base).with_context(|| format!("cannot create {}", base.display()))?;
+    let base = enter_folders(&project.root, &parent, true)?;
+    let base_mode = fs::symlink_metadata(&base)?.permissions().mode() & 0o7777;
+    make_writable(&base)?;
     let mut restorer = Restorer {
         store,
         report: Report::default(),
     };
-    restorer.sync(&base, &parent, &current, &wanted)?;
+    let synced = restorer.sync(&base, &parent, &current, &wanted);
+    set_mode(&base, base_mode)?;
+    synced?;
     Ok(Restored {
         safety,
         report: restorer.report,
     })
+}
+
+fn enter_folders(root: &Path, parent: &str, create: bool) -> Result<PathBuf> {
+    let mut base = root.to_path_buf();
+    for part in parent.split('/').filter(|part| !part.is_empty()) {
+        base.push(part);
+        match fs::symlink_metadata(&base) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => bail!(
+                "{} is no longer a folder (a link or a file took its place); run `airbag undo` without --path to restore it",
+                base.strip_prefix(root).unwrap_or(&base).display()
+            ),
+            Err(error) if error.kind() == ErrorKind::NotFound && !create => break,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                fs::create_dir(&base)
+                    .with_context(|| format!("cannot create {}", base.display()))?;
+            }
+            Err(error) => {
+                return Err(error).with_context(|| format!("cannot read {}", base.display()));
+            }
+        }
+    }
+    Ok(base)
 }
 
 fn entries_at(store: &Store, tree: &str, scope: Option<&str>) -> Result<(String, Vec<Node>)> {
@@ -369,7 +396,7 @@ impl Restorer<'_> {
     }
 }
 
-fn sibling_temp(path: &Path) -> std::path::PathBuf {
+fn sibling_temp(path: &Path) -> PathBuf {
     path.with_file_name(format!(".airbag-{}", unique_suffix()))
 }
 

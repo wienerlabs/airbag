@@ -310,3 +310,58 @@ fn missing_stored_copy_aborts_before_touching_anything() {
     assert_eq!(state(&f.root), wrecked);
     assert_eq!(f.project.ids().unwrap(), [snapshot.id]);
 }
+
+#[test]
+fn scoped_undo_never_follows_a_folder_swapped_for_a_link() {
+    let f = fixture();
+    write(&f.root, "a/b/c.txt", "secret\n");
+    agent(&f, "swap a for a link");
+    let outside = f._temp.path().join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::remove_dir_all(f.root.join("a")).unwrap();
+    symlink(&outside, f.root.join("a")).unwrap();
+    let current = restore::current_tree(&f.store, &f.project, &f.settings).unwrap();
+    let target = restore::undo_target(&f.store, &f.project, &current, Some("a/b/c.txt"))
+        .unwrap()
+        .unwrap();
+
+    let error = restore::restore(
+        &f.store,
+        &f.project,
+        &f.settings,
+        &target,
+        Some("a/b/c.txt"),
+    )
+    .err()
+    .expect("a scoped undo through a link must refuse");
+
+    assert!(
+        format!("{error:#}").contains("no longer a folder"),
+        "{error:#}"
+    );
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    assert!(
+        fs::symlink_metadata(f.root.join("a"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    undo(&f, None);
+    assert_eq!(read(&f.root, "a/b/c.txt"), "secret\n");
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+}
+
+#[test]
+fn undo_works_in_a_read_only_root_and_keeps_its_mode() {
+    let f = fixture();
+    agent(&f, "touch junk.txt");
+    write(&f.root, "junk.txt", "junk");
+    fs::set_permissions(&f.root, fs::Permissions::from_mode(0o555)).unwrap();
+
+    undo(&f, None);
+    let mode = fs::metadata(&f.root).unwrap().permissions().mode() & 0o7777;
+    fs::set_permissions(&f.root, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(!f.root.join("junk.txt").exists());
+    assert_eq!(mode, 0o555);
+}
