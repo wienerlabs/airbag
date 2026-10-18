@@ -21,14 +21,21 @@ airbag undo
 
 ## Install
 
+On an Apple silicon Mac:
+
 ```
-cargo install --git https://github.com/wienerlabs/airbag
+curl -fsSL https://github.com/wienerlabs/airbag/releases/latest/download/airbag-aarch64-apple-darwin.tar.gz | tar xz
+sudo mv airbag-aarch64-apple-darwin/airbag /usr/local/bin/
 airbag install claude
 ```
 
-Needs Rust 1.89 or newer. macOS and Linux.
+Other builds on the [releases page](https://github.com/wienerlabs/airbag/releases/latest):
+`x86_64-apple-darwin` (Intel Mac), `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`
+(any Linux). Each archive has a `.sha256` file and a build provenance attestation you can check
+with `gh attestation verify airbag-*.tar.gz -R wienerlabs/airbag`. With Rust 1.89 or newer you can
+build it yourself: `cargo install --git https://github.com/wienerlabs/airbag`.
 
-The second command adds one hook to `~/.claude/settings.json`. Restart open Claude Code
+`airbag install claude` adds one hook to `~/.claude/settings.json`. Restart open Claude Code
 sessions and every Bash, Edit, Write, MultiEdit and NotebookEdit call in a git project is
 protected, including calls made by subagents. `airbag uninstall claude` removes it.
 

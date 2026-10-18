@@ -30,7 +30,7 @@ jobs:
       - name: package
         shell: bash
         run: |
-          name="airbag-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="airbag-${{ matrix.target }}"
           mkdir "$name"
           cp "target/${{ matrix.target }}/release/airbag" README.md LICENSE "$name/"
           tar czf "$name.tar.gz" "$name"
